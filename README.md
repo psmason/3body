@@ -1,6 +1,6 @@
 # 3body
 
-Depends on ffmpg.
+Depends on ffmpeg.
 
 Endpoints:
 * [lissajous](http://localhost:8000/lissajous)

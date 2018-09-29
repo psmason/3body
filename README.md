@@ -3,5 +3,5 @@
 Depends on ffmpg.
 
 Endpoints:
-* [lissajous](localhost:8000/lissajous)
-* [3body](localhost:8000/3body)
+* [lissajous](http://localhost:8000/lissajous)
+* [3body](http://localhost:8000/3body)

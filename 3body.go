@@ -155,7 +155,6 @@ func nBody(writer io.WriteCloser) {
 	particles := []particle{}
 	for i := 0; i < count; i++ {
 		particles = append(particles, newParticle())
-
 	}
 
 	for {

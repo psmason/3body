@@ -4,16 +4,36 @@ import (
 	"image"
 	"image/color"
 	"image/png"
+	"io"
+	"log"
 	"math"
 	"math/rand"
 	"os"
+	"os/exec"
 )
 
 func main() {
-	lissajous()
+	cmd := exec.Command("ffmpeg",
+		"-f", "image2pipe",
+		"-pix_fmt", "yuv420p",
+		"-r", "8",
+		"-i", "-",
+		"-f", "ogg",
+		"-qscale:v", "10",
+		"-f", "ogg", "-")
+	cmd.Stdout = os.Stdout
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		log.Fatal(err)
+	}
+	err = cmd.Start()
+	if err != nil {
+		log.Fatal(err)
+	}
+	lissajous(stdin)
 }
 
-func lissajous() {
+func lissajous(writer io.WriteCloser) {
 	const (
 		blackIndex = 0
 		greenIndex = 1
@@ -41,7 +61,7 @@ func lissajous() {
 			img.SetColorIndex(size+int(x*size+0.5), size+int(y*size*0.5), greenIndex)
 		}
 
-		png.Encode(os.Stdout, img)
+		png.Encode(writer, img)
 		phase += 0.01
 	}
 }

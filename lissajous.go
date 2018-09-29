@@ -8,11 +8,16 @@ import (
 	"log"
 	"math"
 	"math/rand"
-	"os"
+	"net/http"
 	"os/exec"
 )
 
 func main() {
+	http.HandleFunc("/lissajous", requestHandler)
+	log.Fatal(http.ListenAndServe("localhost:8000", nil))
+}
+
+func requestHandler(w http.ResponseWriter, r *http.Request) {
 	cmd := exec.Command("ffmpeg",
 		"-f", "image2pipe",
 		"-pix_fmt", "yuv420p",
@@ -21,7 +26,7 @@ func main() {
 		"-f", "ogg",
 		"-qscale:v", "10",
 		"-f", "ogg", "-")
-	cmd.Stdout = os.Stdout
+	cmd.Stdout = w
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		log.Fatal(err)

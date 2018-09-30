@@ -23,7 +23,7 @@ func requestHandler(w http.ResponseWriter, r *http.Request) {
 	cmd := exec.Command("ffmpeg",
 		"-f", "image2pipe",
 		"-pix_fmt", "yuv420p",
-		"-r", "8",
+		"-r", "16",
 		"-i", "-",
 		"-f", "ogg",
 		"-qscale:v", "10",
@@ -91,7 +91,7 @@ func nBody(writer io.WriteCloser) {
 		g          = 1E-2 // gravitational constant
 		m          = 1.0  // same mass for all particles
 		count      = 3    // number of particles
-		epoch      = 1    // simulation epoch
+		epoch      = 5    // simulation epoch
 		drawRadius = 8
 	)
 

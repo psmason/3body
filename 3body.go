@@ -88,7 +88,7 @@ func nBody(writer io.WriteCloser) {
 	const (
 		greenIndex = 1
 		size       = 800
-		g          = 1E-2 // gravitational constant
+		g          = 1E-1 // gravitational constant
 		m          = 1.0  // same mass for all particles
 		count      = 3    // number of particles
 		epoch      = 5    // simulation epoch
@@ -102,6 +102,7 @@ func nBody(writer io.WriteCloser) {
 	}
 
 	distanceFn := func(p1, p2 *particle) float64 {
+		// euclidean
 		return math.Sqrt(math.Pow(p1.xPosition-p2.xPosition, 2) + math.Pow(p1.yPosition-p2.yPosition, 2))
 	}
 
@@ -125,7 +126,7 @@ func nBody(writer io.WriteCloser) {
 			return force{}
 		}
 
-		c := g * p1.mass * p2.mass / distanceFn(p1, p2)
+		c := g * p1.mass * p2.mass / math.Pow(d, 2)
 		return force{
 			x: c * (p2.xPosition - p1.xPosition),
 			y: c * (p2.yPosition - p1.yPosition),

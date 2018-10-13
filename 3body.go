@@ -11,10 +11,25 @@ import (
 	"math/rand"
 	"net/http"
 	"os/exec"
+	"time"
+
+	"golang.org/x/image/font"
+	"golang.org/x/image/font/basicfont"
+	"golang.org/x/image/math/fixed"
+)
+
+const (
+	greenIndex = 1
+	size       = 800
+	g          = 1    // gravitational constant
+	m          = 1E7  // same mass for all particles
+	epoch      = 1E-5 // simulation epoch
+	count      = 3    // number of particles
+	drawRadius = 8
 )
 
 func main() {
-	http.HandleFunc("/lissajous", requestHandler)
+	rand.Seed(time.Now().UTC().UnixNano())
 	http.HandleFunc("/3body", requestHandler)
 	log.Fatal(http.ListenAndServe("localhost:8000", nil))
 }
@@ -23,7 +38,7 @@ func requestHandler(w http.ResponseWriter, r *http.Request) {
 	cmd := exec.Command("ffmpeg",
 		"-f", "image2pipe",
 		"-pix_fmt", "yuv420p",
-		"-r", "16",
+		"-r", "24",
 		"-i", "-",
 		"-f", "ogg",
 		"-qscale:v", "10",
@@ -37,111 +52,101 @@ func requestHandler(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		log.Fatal(err)
 	}
+	nBody(stdin)
+}
 
-	path := r.URL.Path
-	if path == "/lissajous" {
-		lissajous(stdin)
-	} else if path == "/3body" {
-		nBody(stdin)
-	} else {
-		fmt.Fprintf(w, "nope")
+type particle struct {
+	mass                         float64
+	xPosition, yPosition         float64
+	xVelocity, yVelocity         float64
+	xAcceleration, yAcceleration float64
+}
+
+type force struct {
+	x, y float64
+}
+
+func newParticle() particle {
+	return particle{
+		mass:          m,
+		xPosition:     rand.NormFloat64() * size / 6,
+		yPosition:     rand.NormFloat64() * size / 6,
+		xVelocity:     0.0,
+		yVelocity:     0.0,
+		xAcceleration: 0.0,
+		yAcceleration: 0.0,
 	}
 }
 
-func lissajous(writer io.WriteCloser) {
-	const (
-		blackIndex = 0
-		greenIndex = 1
-		redIndex   = 2
-		blueIndex  = 3
-		res        = 0.001
-		size       = 400
-		nframes    = 6400
-		delay      = 8
-		cycles     = 5.0
-	)
+func (p1 *particle) distanceSquared(p2 *particle) float64 {
+	dx := p1.xPosition - p2.xPosition
+	dy := p1.yPosition - p2.yPosition
+	return dx*dx + dy*dy
+}
 
-	freq := rand.Float64() * 3.0
-	phase := 0.0
-	for i := 0; ; i++ {
-		rect := image.Rect(0, 0, 2*size+1, 2*size+1)
-		img := image.NewPaletted(rect,
-			[]color.Color{
-				color.Black,
-				color.RGBA{0x00, 0xFF, 0x00, 0xFF}, // green
-			})
-		for t := 0.0; t < cycles*2*math.Pi; t += res {
-			x := math.Sin(t)
-			y := math.Sin(t*freq + phase)
-			img.SetColorIndex(size+int(x*size+0.5), size+int(y*size*0.5), greenIndex)
-		}
-
-		png.Encode(writer, img)
-		phase += 0.01
+func (p1 *particle) forceActedOnBy(p2 *particle) force {
+	d := p1.distanceSquared(p2)
+	if d == 0 {
+		// the same particle
+		return force{}
 	}
+
+	c := g * p1.mass * p2.mass / (d*math.Sqrt(d) + /* softening */ 1E6)
+	return force{
+		x: c * (p2.xPosition - p1.xPosition),
+		y: c * (p2.yPosition - p1.yPosition),
+	}
+}
+
+func (p *particle) totalForceActedOnBy(particles []particle) force {
+	totalForce := force{}
+	for _, o := range particles {
+		partialForce := p.forceActedOnBy(&o)
+		totalForce.x += partialForce.x
+		totalForce.y += partialForce.y
+	}
+	return totalForce
+}
+
+func (p *particle) update(f force) particle {
+	// leapfrog integration
+	// https://en.wikipedia.org/wiki/Leapfrog_integration
+	xVelocity := p.xVelocity + epoch*0.5*p.xAcceleration
+	yVelocity := p.yVelocity + epoch*0.5*p.yAcceleration
+	xPosition := p.xPosition + epoch*xVelocity
+	yPosition := p.yPosition + epoch*yVelocity
+	xVelocity = p.xVelocity + epoch*0.5*f.x
+	yVelocity = p.yVelocity + epoch*0.5*f.y
+	return particle{
+		mass:          p.mass,
+		xPosition:     xPosition,
+		yPosition:     yPosition,
+		xVelocity:     xVelocity,
+		yVelocity:     yVelocity,
+		xAcceleration: f.x,
+		yAcceleration: f.y,
+	}
+}
+
+func addLabel(img *image.Paletted, x, y int, label string) {
+	//col := color.RGBA{200, 100, 0, 255}
+	col := image.NewPaletted(image.Rect(0, 0, 200, 100), []color.Color{
+		color.RGBA{0xFF, 0xFF, 0xFF, 0xFF}, // white
+	})
+	point := fixed.Point26_6{fixed.Int26_6(x * 64), fixed.Int26_6(y * 64)}
+
+	d := &font.Drawer{
+		Dst:  img,
+		Src:  col,
+		Face: basicfont.Face7x13,
+		Dot:  point,
+	}
+	d.DrawString(label)
 }
 
 func nBody(writer io.WriteCloser) {
 	// https://en.wikipedia.org/wiki/N-body_problem
 	// two dimensions only
-
-	const (
-		greenIndex = 1
-		size       = 800
-		g          = 1E-1 // gravitational constant
-		m          = 1.0  // same mass for all particles
-		count      = 3    // number of particles
-		epoch      = 5    // simulation epoch
-		drawRadius = 8
-	)
-
-	type particle struct {
-		mass                 float64
-		xPosition, yPosition float64
-		xVelocity, yVelocity float64
-	}
-
-	distanceFn := func(p1, p2 *particle) float64 {
-		// euclidean
-		return math.Sqrt(math.Pow(p1.xPosition-p2.xPosition, 2) + math.Pow(p1.yPosition-p2.yPosition, 2))
-	}
-
-	newParticle := func() particle {
-		return particle{
-			mass:      m,
-			xPosition: rand.NormFloat64() * size / 6,
-			yPosition: rand.NormFloat64() * size / 6,
-			xVelocity: 0.0,
-			yVelocity: 0.0,
-		}
-	}
-
-	type force struct {
-		x, y float64
-	}
-
-	forceFn := func(p1, p2 *particle) force {
-		d := distanceFn(p1, p2)
-		if 0.0 == d {
-			return force{}
-		}
-
-		c := g * p1.mass * p2.mass / math.Pow(d, 2)
-		return force{
-			x: c * (p2.xPosition - p1.xPosition),
-			y: c * (p2.yPosition - p1.yPosition),
-		}
-	}
-
-	updateFn := func(p particle, f force) particle {
-		return particle{
-			mass:      p.mass,
-			xPosition: p.xPosition + epoch*p.xVelocity,
-			yPosition: p.yPosition + epoch*p.yVelocity,
-			xVelocity: p.xVelocity + epoch*f.x/p.mass, // f = ma -> a = f/m
-			yVelocity: p.yVelocity + epoch*f.y/p.mass, // f = ma -> a = f/m
-		}
-	}
 
 	drawCircle := func(m *image.Paletted, p particle, r int, c uint8) {
 		for x := -r; x < r; x++ {
@@ -158,6 +163,13 @@ func nBody(writer io.WriteCloser) {
 		particles = append(particles, newParticle())
 	}
 
+	// leapfrog initial accelerations
+	for _, p := range particles {
+		totalForce := p.totalForceActedOnBy(particles)
+		p.xAcceleration = totalForce.x
+		p.yAcceleration = totalForce.y
+	}
+
 	for {
 		rect := image.Rect(0, 0, size+1, size+1)
 		img := image.NewPaletted(rect,
@@ -167,18 +179,33 @@ func nBody(writer io.WriteCloser) {
 			})
 
 		updated := []particle{}
-		for _, p1 := range particles {
-			drawCircle(img, p1, drawRadius, greenIndex)
+		forceLabel := ""
+		velocityLabel := ""
+		positionsLabel := ""
+		for _, p := range particles {
+			drawCircle(img, p, drawRadius, greenIndex)
 
-			totalForce := force{}
-			for _, p2 := range particles {
-				partialForce := forceFn(&p1, &p2)
-				totalForce.x += partialForce.x
-				totalForce.y += partialForce.y
+			totalForce := p.totalForceActedOnBy(particles)
+			updated = append(updated, p.update(totalForce))
+
+			if len(forceLabel) == 0 {
+				forceLabel = fmt.Sprintf("forces %f::%f", totalForce.x, totalForce.y)
+				velocityLabel = fmt.Sprintf("velocities %f::%f   %f::%f",
+					particles[0].xVelocity, particles[0].yVelocity,
+					particles[1].xVelocity, particles[1].yVelocity,
+				)
+				positionsLabel = fmt.Sprintf("positions %f::%f   %f::%f   %f",
+					particles[0].xPosition, particles[0].yPosition,
+					particles[1].xPosition, particles[1].yPosition,
+					math.Sqrt(p.distanceSquared(&particles[1])))
 			}
-			updated = append(updated, updateFn(p1, totalForce))
 		}
 
+		if count == 2 {
+			addLabel(img, 0, 50, forceLabel)
+			addLabel(img, 0, 75, velocityLabel)
+			addLabel(img, 0, 100, positionsLabel)
+		}
 		png.Encode(writer, img)
 		particles = updated
 	}

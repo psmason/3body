@@ -1,7 +1,8 @@
 # 3body
 
-Depends on ffmpeg.
+Listens to port 8000 to generate the three body animation.
 
-Endpoints:
-* [lissajous](http://localhost:8000/lissajous)
-* [3body](http://localhost:8000/3body)
+Depends on ffmpeg.  
+
+Endpoint:
+* [localhost:8000](http://localhost:8000/3body)

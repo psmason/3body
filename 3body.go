@@ -78,23 +78,23 @@ func newParticle() particle {
 	}
 }
 
-func (p1 *particle) distanceSquared(p2 *particle) float64 {
-	dx := p1.xPosition - p2.xPosition
-	dy := p1.yPosition - p2.yPosition
+func (p *particle) distanceSquared(o *particle) float64 {
+	dx := p.xPosition - o.xPosition
+	dy := p.yPosition - o.yPosition
 	return dx*dx + dy*dy
 }
 
-func (p1 *particle) forceActedOnBy(p2 *particle) force {
-	d := p1.distanceSquared(p2)
+func (p *particle) forceActedOnBy(o *particle) force {
+	d := p.distanceSquared(o)
 	if d == 0 {
 		// the same particle
 		return force{}
 	}
 
-	c := g * p1.mass * p2.mass / (d*math.Sqrt(d) + /* softening */ 1E6)
+	c := g * p.mass * o.mass / (d*math.Sqrt(d) + /* softening */ 1E6)
 	return force{
-		x: c * (p2.xPosition - p1.xPosition),
-		y: c * (p2.yPosition - p1.yPosition),
+		x: c * (o.xPosition - p.xPosition),
+		y: c * (o.yPosition - p.yPosition),
 	}
 }
 
@@ -128,10 +128,13 @@ func (p *particle) update(f force) particle {
 	}
 }
 
-func addLabel(img *image.Paletted, x, y int, label string) {
-	//col := color.RGBA{200, 100, 0, 255}
+type animator struct {
+	writer io.WriteCloser
+}
+
+func (a *animator) addLabel(img *image.Paletted, x, y int, label string) {
 	col := image.NewPaletted(image.Rect(0, 0, 200, 100), []color.Color{
-		color.RGBA{0xFF, 0xFF, 0xFF, 0xFF}, // white
+		color.Black,
 	})
 	point := fixed.Point26_6{fixed.Int26_6(x * 64), fixed.Int26_6(y * 64)}
 
@@ -144,19 +147,49 @@ func addLabel(img *image.Paletted, x, y int, label string) {
 	d.DrawString(label)
 }
 
-func nBody(writer io.WriteCloser) {
-	// https://en.wikipedia.org/wiki/N-body_problem
-	// two dimensions only
-
-	drawCircle := func(m *image.Paletted, p particle, r int, c uint8) {
-		for x := -r; x < r; x++ {
-			for y := -r; y < r; y++ {
-				if x*x+y*y < r*r {
-					m.SetColorIndex(size/2+int(p.xPosition)+x, size/2+int(p.yPosition)+y, c)
-				}
+func (a *animator) drawCircle(img *image.Paletted, p particle, r int, c uint8) {
+	for x := -r; x < r; x++ {
+		for y := -r; y < r; y++ {
+			if x*x+y*y < r*r {
+				img.SetColorIndex(size/2+int(p.xPosition)+x, size/2+int(p.yPosition)+y, c)
 			}
 		}
 	}
+}
+
+func (a *animator) drawParticles(particles []particle) {
+	img := image.NewPaletted(image.Rect(0, 0, size+1, size+1),
+		[]color.Color{
+			color.RGBA{0xff, 0xff, 0xff, 0xff},
+			color.RGBA{0x00, 0x00, 0x00, 0x4f},
+			color.RGBA{0x00, 0x00, 0x00, 0x01},
+		})
+	for _, p := range particles {
+		a.drawCircle(img, p, drawRadius, 2)
+	}
+
+	// debugging information
+	if count == 2 {
+		forceLabel := fmt.Sprintf("accelerations %f::%f   %f::%f",
+			particles[0].xAcceleration, particles[0].yAcceleration,
+			particles[1].xAcceleration, particles[1].yAcceleration)
+		velocityLabel := fmt.Sprintf("velocities %f::%f   %f::%f",
+			particles[0].xVelocity, particles[0].yVelocity,
+			particles[1].xVelocity, particles[1].yVelocity)
+		positionsLabel := fmt.Sprintf("positions %f::%f   %f::%f",
+			particles[0].xPosition, particles[0].yPosition,
+			particles[1].xPosition, particles[1].yPosition)
+		a.addLabel(img, 0, 50, forceLabel)
+		a.addLabel(img, 0, 75, velocityLabel)
+		a.addLabel(img, 0, 100, positionsLabel)
+	}
+
+	png.Encode(a.writer, img)
+}
+
+func nBody(writer io.WriteCloser) {
+	// https://en.wikipedia.org/wiki/N-body_problem
+	// two dimensions only
 
 	particles := []particle{}
 	for i := 0; i < count; i++ {
@@ -170,43 +203,15 @@ func nBody(writer io.WriteCloser) {
 		p.yAcceleration = totalForce.y
 	}
 
+	a := animator{writer: writer}
 	for {
-		rect := image.Rect(0, 0, size+1, size+1)
-		img := image.NewPaletted(rect,
-			[]color.Color{
-				color.Black,
-				color.RGBA{0x00, 0xFF, 0x00, 0xFF}, // green
-			})
+		a.drawParticles(particles)
 
 		updated := []particle{}
-		forceLabel := ""
-		velocityLabel := ""
-		positionsLabel := ""
 		for _, p := range particles {
-			drawCircle(img, p, drawRadius, greenIndex)
-
 			totalForce := p.totalForceActedOnBy(particles)
 			updated = append(updated, p.update(totalForce))
-
-			if len(forceLabel) == 0 {
-				forceLabel = fmt.Sprintf("forces %f::%f", totalForce.x, totalForce.y)
-				velocityLabel = fmt.Sprintf("velocities %f::%f   %f::%f",
-					particles[0].xVelocity, particles[0].yVelocity,
-					particles[1].xVelocity, particles[1].yVelocity,
-				)
-				positionsLabel = fmt.Sprintf("positions %f::%f   %f::%f   %f",
-					particles[0].xPosition, particles[0].yPosition,
-					particles[1].xPosition, particles[1].yPosition,
-					math.Sqrt(p.distanceSquared(&particles[1])))
-			}
 		}
-
-		if count == 2 {
-			addLabel(img, 0, 50, forceLabel)
-			addLabel(img, 0, 75, velocityLabel)
-			addLabel(img, 0, 100, positionsLabel)
-		}
-		png.Encode(writer, img)
 		particles = updated
 	}
 }

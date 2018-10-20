@@ -1,10 +1,9 @@
 package main
 
 import (
-	"fmt"
 	"image"
 	"image/color"
-	"image/png"
+	"image/jpeg"
 	"io"
 	"log"
 	"math"
@@ -12,10 +11,6 @@ import (
 	"net/http"
 	"os/exec"
 	"time"
-
-	"golang.org/x/image/font"
-	"golang.org/x/image/font/basicfont"
-	"golang.org/x/image/math/fixed"
 )
 
 const (
@@ -129,22 +124,13 @@ func (p *particle) update(f force) particle {
 }
 
 type animator struct {
-	writer io.WriteCloser
+	writer              io.WriteCloser
+	particleGenerations []particleGeneration
 }
 
-func (a *animator) addLabel(img *image.Paletted, x, y int, label string) {
-	col := image.NewPaletted(image.Rect(0, 0, 200, 100), []color.Color{
-		color.Black,
-	})
-	point := fixed.Point26_6{fixed.Int26_6(x * 64), fixed.Int26_6(y * 64)}
-
-	d := &font.Drawer{
-		Dst:  img,
-		Src:  col,
-		Face: basicfont.Face7x13,
-		Dot:  point,
-	}
-	d.DrawString(label)
+type particleGeneration struct {
+	p particle
+	c uint8
 }
 
 func (a *animator) drawCircle(img *image.Paletted, p particle, r int, c uint8) {
@@ -158,33 +144,39 @@ func (a *animator) drawCircle(img *image.Paletted, p particle, r int, c uint8) {
 }
 
 func (a *animator) drawParticles(particles []particle) {
-	img := image.NewPaletted(image.Rect(0, 0, size+1, size+1),
-		[]color.Color{
-			color.RGBA{0xff, 0xff, 0xff, 0xff},
-			color.RGBA{0x00, 0x00, 0x00, 0x4f},
-			color.RGBA{0x00, 0x00, 0x00, 0x01},
-		})
+	// update existing generations
+	pruneIndex := -1
+	for i, p := range a.particleGenerations {
+		if p.c == 1 {
+			pruneIndex = i
+		} else {
+			a.particleGenerations[i].c -= 1
+		}
+	}
+	a.particleGenerations = a.particleGenerations[pruneIndex+1:]
+
+	// newest generation will be black
 	for _, p := range particles {
-		a.drawCircle(img, p, drawRadius, 2)
+		a.particleGenerations = append(a.particleGenerations, particleGeneration{p: p, c: 8})
 	}
 
-	// debugging information
-	if count == 2 {
-		forceLabel := fmt.Sprintf("accelerations %f::%f   %f::%f",
-			particles[0].xAcceleration, particles[0].yAcceleration,
-			particles[1].xAcceleration, particles[1].yAcceleration)
-		velocityLabel := fmt.Sprintf("velocities %f::%f   %f::%f",
-			particles[0].xVelocity, particles[0].yVelocity,
-			particles[1].xVelocity, particles[1].yVelocity)
-		positionsLabel := fmt.Sprintf("positions %f::%f   %f::%f",
-			particles[0].xPosition, particles[0].yPosition,
-			particles[1].xPosition, particles[1].yPosition)
-		a.addLabel(img, 0, 50, forceLabel)
-		a.addLabel(img, 0, 75, velocityLabel)
-		a.addLabel(img, 0, 100, positionsLabel)
+	img := image.NewPaletted(image.Rect(0, 0, size, size),
+		[]color.Color{
+			color.Gray{0xff},
+			color.Gray{0xdf},
+			color.Gray{0xbf},
+			color.Gray{0x9f},
+			color.Gray{0x7f},
+			color.Gray{0x5f},
+			color.Gray{0x3f},
+			color.Gray{0x1f},
+			color.Gray{0x00},
+		})
+	for _, p := range a.particleGenerations {
+		a.drawCircle(img, p.p, drawRadius, p.c)
 	}
 
-	png.Encode(a.writer, img)
+	jpeg.Encode(a.writer, img, nil)
 }
 
 func nBody(writer io.WriteCloser) {
@@ -203,7 +195,9 @@ func nBody(writer io.WriteCloser) {
 		p.yAcceleration = totalForce.y
 	}
 
-	a := animator{writer: writer}
+	a := animator{
+		writer: writer,
+	}
 	for {
 		a.drawParticles(particles)
 
